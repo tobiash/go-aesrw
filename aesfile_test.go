@@ -17,6 +17,9 @@ func TestDecryptReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	encFile, err := os.OpenFile(filepath.Join("testdata", "foo.pass.json.enc"), os.O_RDONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer encFile.Close()
 	cipher, err := aes.NewCipher(masterKey)
 	if err != nil {
@@ -32,6 +35,7 @@ func TestDecryptReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(expected) != string(res) {
+		ioutil.WriteFile("testdata/foo.pass.json.out", res, 0644)
 		t.Errorf("Decryption had unexpected result:\n%s\nexpected:\n%s", string(res), string(expected))
 	}
 }
@@ -82,7 +86,7 @@ func TestEncryptWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(res) != "Hello World12345" {
-		t.Error("Recovered plaintext did not match expectations")
+		t.Errorf("Recovered plaintext did not match expectations:\n%v\n%v", res, []byte("Hello World12345"))
 	}
 	// fmt.Println("Result:")
 	// fmt.Println(string(res))

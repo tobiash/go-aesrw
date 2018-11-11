@@ -1,6 +1,7 @@
 package aesrw
 
 import (
+	"bufio"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -8,17 +9,19 @@ import (
 	"io"
 )
 
-var decryptionError = fmt.Errorf("decryption error")
-var encryptionError = fmt.Errorf("encryption error")
+var errDecrypt = fmt.Errorf("decryption error")
+var errEncrypt = fmt.Errorf("encryption error")
 
-// New creates a new AES encrypted file around a backing file
+// NewCBCReader creates a new AES decrypting reader around a backing reader
 func NewCBCReader(backing io.ReadCloser, cipher cipher.Block) io.ReadCloser {
 	return &aesreader{
-		backing: backing,
+		backing: bufio.NewReader(backing),
+		closer:  backing,
 		cipher:  cipher,
 	}
 }
 
+// NewCBCWriter creates a new AES encrypting writer around a backing writer
 func NewCBCWriter(backing io.WriteCloser, cipher cipher.Block) io.WriteCloser {
 	return &aeswriter{
 		backing: backing,
@@ -27,7 +30,8 @@ func NewCBCWriter(backing io.WriteCloser, cipher cipher.Block) io.WriteCloser {
 }
 
 type aesreader struct {
-	backing io.ReadCloser
+	backing *bufio.Reader
+	closer  io.Closer
 	cipher  cipher.Block
 	mode    cipher.BlockMode
 	buffer  [aes.BlockSize]byte
@@ -48,7 +52,7 @@ func (r *aesreader) Read(p []byte) (n int, err error) {
 		// Read the IV first
 		iv := r.buffer[:]
 		if n, err := r.backing.Read(iv); n != len(iv) || err != nil {
-			return 0, decryptionError
+			return 0, errDecrypt
 		}
 		r.mode = cipher.NewCBCDecrypter(r.cipher, iv)
 		r.current = r.buffer[:0]
@@ -67,7 +71,13 @@ func (r *aesreader) Read(p []byte) (n int, err error) {
 				r.atEOF = true
 			}
 			r.mode.CryptBlocks(r.current, r.current)
-			r.current, err = removePadding(r.current)
+			_, err = r.backing.Peek(1)
+			if err == io.EOF || r.atEOF {
+				r.current, err = removePadding(r.current)
+				if err != nil {
+					return n, err
+				}
+			}
 		}
 		w := len(p) - n
 		if len(r.current) < w {
@@ -107,7 +117,7 @@ func (r *aeswriter) init() error {
 		return err
 	}
 	if w, err := r.backing.Write(iv); w != len(iv) || err != nil {
-		return encryptionError
+		return errEncrypt
 	}
 	r.mode = cipher.NewCBCEncrypter(r.cipher, iv)
 	return nil
@@ -151,11 +161,11 @@ func removePadding(block []byte) ([]byte, error) {
 	}
 	padding := int(block[len(block)-1])
 	if padding > len(block) {
-		return block, decryptionError
+		return block, errDecrypt
 	}
 	return block[:len(block)-padding], nil
 }
 
 func (r *aesreader) Close() error {
-	return r.backing.Close()
+	return r.closer.Close()
 }
